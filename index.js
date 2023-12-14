@@ -2,7 +2,6 @@ import { config } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { mnemonicNew, mnemonicToWalletKey } from '@ton/crypto';
 import TonWeb from 'tonweb';
 import cron from 'node-cron';
 import axios from 'axios';
@@ -36,7 +35,6 @@ const loadWalletAddresses = () => {
 
 const getWalletBalance = async (walletAddress) => {
   try {
-    console.log(`Getting balance for address ${walletAddress}`);
     const balance = await tonweb.getBalance(walletAddress);
     const balanceFormatted = TonWeb.utils.fromNano(balance);
     console.log(`Balance for address ${walletAddress}: ${balanceFormatted}`);
@@ -48,8 +46,6 @@ const getWalletBalance = async (walletAddress) => {
 }
 
 const monitorAddress = async (userId, walletAddress, lastBalances) => {
-  console.log(`Checking address ${walletAddress} for user ${userId}...`);
-
   try {
     const currentBalance = await getWalletBalance(walletAddress);
 
@@ -91,7 +87,7 @@ const initializeBalances = async () => {
       // lastBalances[userId] = 0;
     });
 
-    cron.schedule('*/30 * * * * *', () => {
+    cron.schedule('*/5 * * * * *', () => {
       Object.entries(userWalletAddresses).forEach(([userId, walletAddress]) => {
         monitorAddress(userId, walletAddress, lastBalances);
       });
