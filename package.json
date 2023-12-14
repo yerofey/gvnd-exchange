@@ -1,0 +1,28 @@
+{
+  "name": "gvnd-exchange",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "pnpm i && pm2 restart ecosystem.json --env production",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Yerofey S. <pm@yerofey.dev> (https://github.com/yerofey)",
+  "license": "MIT",
+  "dependencies": {
+    "@ton/crypto": "^3.2.0",
+    "@ton/ton": "^13.9.0",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "node-cron": "^3.0.3",
+    "tonweb": "^0.0.62",
+    "tonweb-mnemonic": "^1.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "pm2": "^5.3.0"
+  }
+}
