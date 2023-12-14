@@ -9,7 +9,7 @@ import axios from 'axios';
 
 config();
 
-const sendBalanceChanges = false;
+const sendBalanceChanges = true;
 
 const tonweb = new TonWeb(
   new TonWeb.HttpProvider('https://toncenter.com/api/v2/jsonRPC', {
