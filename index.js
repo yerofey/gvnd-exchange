@@ -147,7 +147,7 @@ const initializeBalances = async () => {
 };
 
 const main = async () => {
-  console.log(`Starting the monitoring (interval: ${interval} seconds))`);
+  console.log(`Starting the monitoring (interval: ${interval} seconds)`);
   await initializeBalances();
 }
 
