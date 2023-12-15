@@ -17,6 +17,9 @@ const tonweb = new TonWeb(
   })
 );
 
+const lastBalances = {};
+const lastTransactionTimes = {};
+
 const getTonPrice = async () => {
   try {
     const response = await axios.get(
@@ -74,43 +77,52 @@ const findLatestTransactionUtime = (transactions) => {
   return latestUtime;
 };
 
-const monitorAddress = async (userId, walletAddress, lastBalances) => {
+const monitorAddress = async (userId, walletAddress) => {
   try {
     const currentBalance = await getWalletBalance(walletAddress);
 
     if (lastBalances[userId] !== currentBalance) {
       const balanceChange = currentBalance - lastBalances[userId];
       lastBalances[userId] = currentBalance;
-
       console.log(
         `Balance change detected for wallet ${walletAddress}: ${balanceChange}`
       );
 
-      // Save the balance change
-      if (sendBalanceChanges) {
-        console.log(`Sending balance change for user ${userId}...`);
-        // Fetch the latest transactions for the wallet
-        const latestTransactions =
-          (await getWalletTransactions(walletAddress, 1)) || [];
-        console.log(
-          `Latest transactions for ${walletAddress}:`,
-          latestTransactions
-        );
-        const latestTransactionUtime =
-          findLatestTransactionUtime(latestTransactions) || 0;
+      // Fetch the latest transactions for the wallet
+      const latestTransactions =
+        (await getWalletTransactions(walletAddress, 1)) || [];
+      const latestTransactionUtime =
+        findLatestTransactionUtime(latestTransactions) || 0;
 
-        if (latestTransactionUtime > 0) {
-          const response = await axios.post(
-            `${process.env.GVND_API_URL}?method=updateWalletBalance`,
-            {
-              userId,
-              walletAddress,
-              txTimestamp: latestTransactionUtime,
-              balance: currentBalance,
-              price: await getTonPrice(),
-            }
+      // Save the balance change
+      if (latestTransactionUtime > 0) {
+        // Compare with the stored latest transaction time
+        if (lastTransactionTimes[userId] !== latestUtime) {
+          lastTransactionTimes[userId] = latestUtime;
+          console.log(
+            `New transaction detected for user ${userId} at time ${latestUtime}`
           );
-          console.log('response:', response.data);
+
+          if (sendBalanceChanges) {
+            console.log(
+              `Sending balance change ${balanceChange} for user ${userId}...`
+            );
+            try {
+              const response = await axios.post(
+                `${process.env.GVND_API_URL}?method=updateWalletBalance`,
+                {
+                  userId,
+                  walletAddress,
+                  txTimestamp: latestTransactionUtime,
+                  balance: currentBalance,
+                  price: await getTonPrice(),
+                }
+              );
+              console.log(`Response: ${response.data}`);
+            } catch (err) {
+              console.error(`Error sending balance change: ${err.message}`);
+            }
+          }
         }
       }
     }
@@ -122,7 +134,6 @@ const monitorAddress = async (userId, walletAddress, lastBalances) => {
 const initializeBalances = async () => {
   console.log('Initializing balances...');
   const userWalletAddresses = loadWalletAddresses();
-  const lastBalances = {};
 
   try {
     console.log('Getting initial balances...');
@@ -134,11 +145,12 @@ const initializeBalances = async () => {
     const balances = await Promise.all(balancePromises);
     balances.forEach(({ userId, balance }) => {
       lastBalances[userId] = balance;
+      lastTransactionTimes[userId] = 0;
     });
 
     cron.schedule(`*/${interval} * * * * *`, () => {
       Object.entries(userWalletAddresses).forEach(([userId, walletAddress]) => {
-        monitorAddress(userId, walletAddress, lastBalances);
+        monitorAddress(userId, walletAddress);
       });
     });
   } catch (error) {
@@ -149,6 +161,6 @@ const initializeBalances = async () => {
 const main = async () => {
   console.log(`Starting the monitoring (interval: ${interval} seconds)`);
   await initializeBalances();
-}
+};
 
 main();
