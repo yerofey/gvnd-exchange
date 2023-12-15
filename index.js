@@ -8,7 +8,8 @@ import axios from 'axios';
 
 config();
 
-const sendBalanceChanges = true;
+const interval = process.env.MONITOR_INTERVAL || 10;
+const sendBalanceChanges = process.env.SAVE_BALANCE_CHANGE === 'true';
 
 const tonweb = new TonWeb(
   new TonWeb.HttpProvider('https://toncenter.com/api/v2/jsonRPC', {
@@ -18,13 +19,15 @@ const tonweb = new TonWeb(
 
 const getTonPrice = async () => {
   try {
-    const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd');
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd'
+    );
     return response.data['the-open-network'].usd;
   } catch (error) {
     console.error('Error fetching TON price:', error);
     return 0;
   }
-}
+};
 
 const loadWalletAddresses = () => {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,7 +46,33 @@ const getWalletBalance = async (walletAddress) => {
     console.error(`Error getting balance for address ${walletAddress}:`, error);
     return 0;
   }
-}
+};
+
+const getWalletTransactions = async (address, limit = 10) => {
+  try {
+    const transactions = await tonweb.getTransactions(address, limit);
+    return transactions;
+  } catch (error) {
+    console.error(`Error fetching transactions for address ${address}:`, error);
+    return [];
+  }
+};
+
+const findLatestTransactionUtime = (transactions) => {
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    return 0;
+  }
+
+  // Find the transaction with the maximum utime
+  let latestUtime = transactions[0].utime;
+  transactions.forEach((tx) => {
+    if (tx.utime > latestUtime) {
+      latestUtime = tx.utime;
+    }
+  });
+
+  return latestUtime;
+};
 
 const monitorAddress = async (userId, walletAddress, lastBalances) => {
   try {
@@ -53,22 +82,42 @@ const monitorAddress = async (userId, walletAddress, lastBalances) => {
       const balanceChange = currentBalance - lastBalances[userId];
       lastBalances[userId] = currentBalance;
 
-      console.log(`Balance change detected for user ${userId}: ${balanceChange}`);
+      console.log(
+        `Balance change detected for wallet ${walletAddress}: ${balanceChange}`
+      );
 
+      // Save the balance change
       if (sendBalanceChanges) {
-        const response = await axios.post(`${process.env.GVND_API_URL}?method=updateWalletBalance`, {
-          userId,
-          walletAddress,
-          balance: currentBalance,
-          price: await getTonPrice(),
-        });
-        console.log('response:', response.data);
+        console.log(`Sending balance change for user ${userId}...`);
+        // Fetch the latest transactions for the wallet
+        const latestTransactions =
+          (await getWalletTransactions(walletAddress, 1)) || [];
+        console.log(
+          `Latest transactions for ${walletAddress}:`,
+          latestTransactions
+        );
+        const latestTransactionUtime =
+          findLatestTransactionUtime(latestTransactions) || 0;
+
+        if (latestTransactionUtime > 0) {
+          const response = await axios.post(
+            `${process.env.GVND_API_URL}?method=updateWalletBalance`,
+            {
+              userId,
+              walletAddress,
+              txTimestamp: latestTransactionUtime,
+              balance: currentBalance,
+              price: await getTonPrice(),
+            }
+          );
+          console.log('response:', response.data);
+        }
       }
     }
   } catch (error) {
     console.error(`Error monitoring address for user ${userId}:`, error);
   }
-}
+};
 
 const initializeBalances = async () => {
   console.log('Initializing balances...');
@@ -77,17 +126,17 @@ const initializeBalances = async () => {
 
   try {
     console.log('Getting initial balances...');
-    const balancePromises = Object.entries(userWalletAddresses).map(([userId, walletAddress]) =>
-      getWalletBalance(walletAddress).then(balance => ({ userId, balance }))
+    const balancePromises = Object.entries(userWalletAddresses).map(
+      ([userId, walletAddress]) =>
+        getWalletBalance(walletAddress).then((balance) => ({ userId, balance }))
     );
 
     const balances = await Promise.all(balancePromises);
     balances.forEach(({ userId, balance }) => {
       lastBalances[userId] = balance;
-      // lastBalances[userId] = 0;
     });
 
-    cron.schedule('*/5 * * * * *', () => {
+    cron.schedule(`*/${interval} * * * * *`, () => {
       Object.entries(userWalletAddresses).forEach(([userId, walletAddress]) => {
         monitorAddress(userId, walletAddress, lastBalances);
       });
@@ -95,6 +144,13 @@ const initializeBalances = async () => {
   } catch (error) {
     console.error('Error initializing balances:', error.message);
   }
+};
+
+const main = async () => {
+  console.log(`Starting the monitoring...`);
+  console.log(`Update interval: ${interval} seconds`);
+  await initializeBalances();
 }
 
-initializeBalances();
+main();
+
