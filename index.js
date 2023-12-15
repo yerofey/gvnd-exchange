@@ -18,7 +18,9 @@ const tonweb = new TonWeb(
 );
 
 const lastBalances = {};
-const lastTransactionTimes = {};
+const lastTimestamps = {};
+
+const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
 const getTonPrice = async () => {
   try {
@@ -39,7 +41,7 @@ const loadWalletAddresses = () => {
   return JSON.parse(data);
 };
 
-const getWalletBalance = async (walletAddress) => {
+const getWalletBalance = async (walletAddress, retries = 1) => {
   try {
     const balance = await tonweb.getBalance(walletAddress);
     const balanceFormatted = TonWeb.utils.fromNano(balance);
@@ -47,27 +49,37 @@ const getWalletBalance = async (walletAddress) => {
     return balanceFormatted;
   } catch (error) {
     console.error(`Error getting balance for address ${walletAddress}:`, error);
-    return 0;
+    if (retries > 0) {
+      console.log(`Retrying in 2 seconds...`);
+      await delay(2000);
+      return getWalletBalance(walletAddress, retries - 1);
+    }
+    return null;
   }
 };
 
-const getWalletTransactions = async (address, limit = 10) => {
+const getWalletTransactions = async (address, limit = 10, retries = 1) => {
   try {
     const transactions = await tonweb.getTransactions(address, limit);
     return transactions;
   } catch (error) {
     console.error(`Error fetching transactions for address ${address}:`, error);
+    if (retries > 0) {
+      console.log(`Retrying in 2 seconds...`);
+      await delay(2000);
+      return getWalletTransactions(address, limit, retries - 1);
+    }
     return [];
   }
 };
 
-const findLatestTransactionUtime = (transactions) => {
+const findlatestTxTimestamp = (transactions) => {
   if (!Array.isArray(transactions) || transactions.length === 0) {
     return 0;
   }
 
   // Find the transaction with the maximum utime
-  let latestUtime = transactions[0].utime;
+  let latestUtime = transactions[0].utime || 0;
   transactions.forEach((tx) => {
     if (tx.utime > latestUtime) {
       latestUtime = tx.utime;
@@ -81,7 +93,7 @@ const monitorAddress = async (userId, walletAddress) => {
   try {
     const currentBalance = await getWalletBalance(walletAddress);
 
-    if (lastBalances[userId] !== currentBalance) {
+    if (currentBalance !== null && lastBalances[userId] !== currentBalance) {
       const balanceChange = currentBalance - lastBalances[userId];
       lastBalances[userId] = currentBalance;
       console.log(
@@ -91,16 +103,15 @@ const monitorAddress = async (userId, walletAddress) => {
       // Fetch the latest transactions for the wallet
       const latestTransactions =
         (await getWalletTransactions(walletAddress, 1)) || [];
-      const latestTransactionUtime =
-        findLatestTransactionUtime(latestTransactions) || 0;
+      const latestTxTimestamp = findlatestTxTimestamp(latestTransactions) || 0;
 
       // Save the balance change
-      if (latestTransactionUtime > 0) {
+      if (latestTxTimestamp > 0) {
         // Compare with the stored latest transaction time
-        if (lastTransactionTimes[userId] !== latestUtime) {
-          lastTransactionTimes[userId] = latestUtime;
+        if (latestTxTimestamp > lastTimestamps[userId]) {
+          lastTimestamps[userId] = latestTxTimestamp;
           console.log(
-            `New transaction detected for user ${userId} at time ${latestUtime}`
+            `New transaction detected for user ${userId} at time ${latestTxTimestamp}`
           );
 
           if (sendBalanceChanges) {
@@ -113,12 +124,20 @@ const monitorAddress = async (userId, walletAddress) => {
                 {
                   userId,
                   walletAddress,
-                  txTimestamp: latestTransactionUtime,
+                  change: balanceChange,
                   balance: currentBalance,
+                  txTimestamp: latestTxTimestamp,
                   price: await getTonPrice(),
                 }
               );
-              console.log(`Response: ${response.data}`);
+              if (response.status == 200) {
+                console.log(`Balance change sent successfully`);
+              } else {
+                console.error(
+                  `Error sending balance change (status ${response.status}):`,
+                  response.data.error
+                );
+              }
             } catch (err) {
               console.error(`Error sending balance change: ${err.message}`);
             }
@@ -145,7 +164,7 @@ const initializeBalances = async () => {
     const balances = await Promise.all(balancePromises);
     balances.forEach(({ userId, balance }) => {
       lastBalances[userId] = balance;
-      lastTransactionTimes[userId] = 0;
+      lastTimestamps[userId] = 0;
     });
 
     cron.schedule(`*/${interval} * * * * *`, () => {
